@@ -13,6 +13,11 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 app.use(express.json());
 
+// מחזירה תאריך ושעה נוכחיים בפורמט קריא, לפי שעון ישראל
+function nowFormatted() {
+  return new Date().toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' });
+}
+
 // שולחת את הודעת הלקוח ל-OpenAI ומקבלת בחזרה תשובה חכמה
 async function getAIReply(customerText) {
   const completion = await openai.chat.completions.create({
@@ -91,7 +96,7 @@ app.post('/webhook', async (req, res) => {
     console.log(`התקבלה הודעה חדשה ממספר ${from}: "${text}"`);
 
     try {
-      const now = new Date().toISOString();
+      const now = nowFormatted();
       const existingLead = await findLeadByPhone(from);
 
       if (!existingLead) {
