@@ -90,36 +90,47 @@ app.post('/webhook', async (req, res) => {
     const text = message.text?.body;
     console.log(`התקבלה הודעה חדשה ממספר ${from}: "${text}"`);
 
-    let isNewLead = false;
-
     try {
       const now = new Date().toISOString();
       const existingLead = await findLeadByPhone(from);
 
-      if (existingLead) {
-        await updateLead(existingLead.rowNumber, { פנייה_אחרונה: now });
-        console.log(`עודכן ליד קיים בשורה ${existingLead.rowNumber}`);
+      if (!existingLead) {
+        // ליד חדש לגמרי - מתחילים את זרימת הסינון
+        await createLead(from, { שלב: 'ממתין_לעיר', פנייה_אחרונה: now });
+        console.log('נוצר ליד חדש בגיליון, מתחיל שאלון סינון');
+
+        const aiReply = await getAIReply(text);
+        await sendReply(from, aiReply);
+        await sendReply(from, 'לפני שממשיכים - באיזה עיר נמצא הפרויקט? 🏙️');
+        return res.sendStatus(200);
+      }
+
+      const stage = existingLead.data.שלב;
+      const row = existingLead.rowNumber;
+
+      if (stage === 'ממתין_לעיר') {
+        await updateLead(row, { עיר: text, שלב: 'ממתין_למגורים_השקעה', פנייה_אחרונה: now });
+        await sendReply(from, 'מעולה! זה פרויקט למגורים או להשקעה? 🏠💰');
+      } else if (stage === 'ממתין_למגורים_השקעה') {
+        await updateLead(row, { מגורים_או_השקעה: text, שלב: 'ממתין_לקבלן_שיפוץ', פנייה_אחרונה: now });
+        await sendReply(from, 'תודה! זה בית מקבלן לפני כניסה, או שמתכננים לשפץ/לתכנן אותו מחדש? 🔨');
+      } else if (stage === 'ממתין_לקבלן_שיפוץ') {
+        await updateLead(row, { קבלן_או_שיפוץ: text, שלב: 'סינון_הושלם', פנייה_אחרונה: now });
+        await sendReply(
+          from,
+          'קיבלתי את כל הפרטים, תודה! ✨ אני מכין עבורך את החומר המתאים ונחזור אליך בקרוב עם כל הפרטים על ההמשך.'
+        );
       } else {
-        isNewLead = true;
-        await createLead(from, { שלב: 'חדש', פנייה_אחרונה: now });
-        console.log('נוצר ליד חדש בגיליון');
+        // ליד ידוע שכבר סיים את הסינון, או במצב לא מוכר - לא ממשיכים למכור אוטומטית
+        await updateLead(row, { פנייה_אחרונה: now });
+        await sendReply(from, 'היי! קיבלנו את ההודעה שלך ונחזור אליך בהקדם 😊');
+        await sendReply(
+          process.env.OWNER_PHONE,
+          `⚠️ התקבלה הודעה ממספר קיים (${from}):\n"${text}"\n\nכדאי לבדוק את הסטטוס שלו לפני שהבוט ממשיך לדבר איתו.`
+        );
       }
     } catch (err) {
-      console.log('שגיאה בעדכון הגיליון:', err.message);
-      // אם לא הצלחנו לבדוק בגיליון, נניח ליתר ביטחון שזה לא ליד חדש
-      isNewLead = false;
-    }
-
-    if (isNewLead) {
-      const aiReply = await getAIReply(text);
-      await sendReply(from, aiReply);
-    } else {
-      // מספר שכבר קיים אצלנו - לא נריץ עליו את המכירה האוטומטית, רק נעדכן את מאור
-      await sendReply(from, 'היי! קיבלנו את ההודעה שלך ונחזור אליך בהקדם 😊');
-      await sendReply(
-        process.env.OWNER_PHONE,
-        `⚠️ התקבלה הודעה ממספר קיים (${from}):\n"${text}"\n\nכדאי לבדוק את הסטטוס שלו לפני שהבוט ממשיך לדבר איתו.`
-      );
+      console.log('שגיאה בטיפול בהודעה:', err.message);
     }
   }
 
