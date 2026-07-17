@@ -250,10 +250,10 @@ app.post('/webhook', async (req, res) => {
 
       if (stage === 'ממתין_לעיר') {
         await updateLead(row, { עיר: text, שלב: 'ממתין_למגורים_השקעה', פנייה_אחרונה: now });
-        await sendReply(from, 'מעולה! זה פרויקט למגורים או להשקעה? 🏠💰');
+        await sendReply(from, 'שמח שהצטרפת! 😊 בוא נכיר את הפרויקט טוב יותר - זה למגורים או להשקעה? 🏠💰');
       } else if (stage === 'ממתין_למגורים_השקעה') {
         await updateLead(row, { מגורים_או_השקעה: text, שלב: 'ממתין_לקבלן_שיפוץ', פנייה_אחרונה: now });
-        await sendReply(from, 'תודה! זה בית מקבלן לפני כניסה, או שמתכננים לשפץ/לתכנן אותו מחדש? 🔨');
+        await sendReply(from, 'מעולה, תודה על השיתוף! עוד שאלה קטנה - זה בית מקבלן לפני כניסה, או שמתכננים לשפץ/לתכנן אותו מחדש? 🔨');
       } else if (stage === 'ממתין_לקבלן_שיפוץ') {
         const step1Due = new Date(Date.now() + getDeltaHours(1) * 60 * 60 * 1000).toISOString();
         await updateLead(row, {
