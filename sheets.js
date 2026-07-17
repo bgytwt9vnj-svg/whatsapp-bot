@@ -67,6 +67,26 @@ async function createLead(phone, fields = {}) {
   });
 }
 
+// מחזירה את כל הלידים בגיליון, עם מספר השורה של כל אחד
+async function getAllLeads() {
+  const sheets = await getSheetsClient();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID,
+    range: `${SHEET_NAME}!A:L`,
+  });
+
+  const rows = res.data.values || [];
+  const leads = [];
+  for (let i = 1; i < rows.length; i++) {
+    const data = {};
+    COLUMNS.forEach((col, idx) => {
+      data[col] = rows[i][idx] || '';
+    });
+    leads.push({ rowNumber: i + 1, data });
+  }
+  return leads;
+}
+
 // מעדכנת שדות ספציפיים בשורה קיימת (rowNumber מבוסס-1, כמו בגיליון)
 async function updateLead(rowNumber, fields) {
   const sheets = await getSheetsClient();
@@ -86,4 +106,4 @@ async function updateLead(rowNumber, fields) {
   });
 }
 
-module.exports = { findLeadByPhone, createLead, updateLead, COLUMNS };
+module.exports = { findLeadByPhone, createLead, updateLead, getAllLeads, COLUMNS };

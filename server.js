@@ -1,7 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const OpenAI = require('openai');
-const { findLeadByPhone, createLead, updateLead } = require('./sheets');
+const { findLeadByPhone, createLead, updateLead, getAllLeads } = require('./sheets');
+const { detectSegment, maxStepFor, getStepContent, getDeltaHours } = require('./followups');
 
 // רשת ביטחון - מונעת קריסה מלאה של השרת אם משהו נכשל בלי טיפול
 process.on('uncaughtException', (err) => console.log('שגיאה לא מטופלת:', err));
@@ -41,7 +42,8 @@ async function getAIReply(customerText) {
 - אסור לך להמציא מידע שאינך בטוח בו — לא מחירים, לא תאריכים, לא זמינות, ולא פרטים על העסק שלא נמסרו לך. אם אינך יודע תשובה מדויקת, אמור זאת בכנות והצע שנציג אנושי יחזור עם התשובה המדויקת.
 - אל תתחייב בשם העסק להנחות, הטבות, מועדים או התחייבויות כלשהן — לכך נדרש אישור אדם מהצוות.
 - שלב מדי פעם אימוג'ים חמודים ומתאימים (כמו 😊 🏡 ✨) כדי שהטון יהיה חם ונעים, בלי להגזים - לא בכל משפט.
-- הטון שלך אנרגטי, סוחף ומעורר סקרנות אמיתית - גרום ללקוח להרגיש שהוא הגיע למקום הנכון ושכדאי לו להמשיך לשוחח ולהתקדם לפגישת הייעוץ האסטרטגית, כדי לקבל את הערך המלא. עשה זאת רק באמצעות הדגשת ערך אמיתי (מקצועיות, ניסיון, התאמה אישית) - לעולם לא באמצעות דחיפות מזויפת, הבטחות שאינך בטוח בהן, או לחץ שמרגיש לא כן.`,
+- הטון שלך אנרגטי, סוחף ומעורר סקרנות אמיתית - גרום ללקוח להרגיש שהוא הגיע למקום הנכון ושכדאי לו להמשיך לשוחח ולהתקדם לפגישת הייעוץ האסטרטגית, כדי לקבל את הערך המלא. עשה זאת רק באמצעות הדגשת ערך אמיתי (מקצועיות, ניסיון, התאמה אישית) - לעולם לא באמצעות דחיפות מזויפת, הבטחות שאינך בטוח בהן, או לחץ שמרגיש לא כן.
+- אינך יודע אם אתה פונה לגבר או לאישה. לכן פנה בגוף שני בלי לציין במפורש "אתה" או "את" או "אתם", והשתמש במילים שכתובות זהה בזכר ובנקבה (כמו "רוצה", "אותך", "לך") כדי שהפנייה תרגיש אישית ומדויקת לכל אחד.`,
       },
       { role: 'user', content: customerText },
     ],
@@ -91,6 +93,38 @@ async function sendReply(to, text) {
   console.log('תשובת שליחה מ-Meta:', JSON.stringify(data));
 }
 
+// פונקציה ששולחת סרטון (קובץ שהועלה מראש ל-Meta, לפי מזהה) עם כיתוב
+async function sendVideo(to, mediaId, caption) {
+  const url = `https://graph.facebook.com/v21.0/${process.env.PHONE_NUMBER_ID}/messages`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'video',
+      video: { id: mediaId, caption },
+    }),
+  });
+
+  const data = await response.json();
+  console.log('תשובת שליחת וידאו מ-Meta:', JSON.stringify(data));
+}
+
+// שולחת תוכן של שלב מעקב (קישור או סרטון) ללקוח
+async function sendStepContent(to, content) {
+  if (!content) return;
+  if (content.type === 'video') {
+    await sendVideo(to, content.mediaId, content.caption);
+  } else {
+    await sendReply(to, `${content.caption}\n${content.url}`);
+  }
+}
+
 // Meta שולחת בקשת POST לכתובת הזו בכל פעם שמגיעה הודעה חדשה מלקוח
 app.post('/webhook', async (req, res) => {
   const entry = req.body.entry?.[0];
@@ -127,11 +161,32 @@ app.post('/webhook', async (req, res) => {
         await updateLead(row, { מגורים_או_השקעה: text, שלב: 'ממתין_לקבלן_שיפוץ', פנייה_אחרונה: now });
         await sendReply(from, 'תודה! זה בית מקבלן לפני כניסה, או שמתכננים לשפץ/לתכנן אותו מחדש? 🔨');
       } else if (stage === 'ממתין_לקבלן_שיפוץ') {
-        await updateLead(row, { קבלן_או_שיפוץ: text, שלב: 'סינון_הושלם', פנייה_אחרונה: now });
-        await sendReply(
-          from,
-          'קיבלתי את כל הפרטים, תודה! ✨ אני מכין עבורך את החומר המתאים ונחזור אליך בקרוב עם כל הפרטים על ההמשך.'
-        );
+        const step1Due = new Date(Date.now() + getDeltaHours(1) * 60 * 60 * 1000).toISOString();
+        await updateLead(row, {
+          קבלן_או_שיפוץ: text,
+          שלב: 'סינון_הושלם',
+          פנייה_אחרונה: now,
+          שלב_מעקב: '0',
+          מעקב_הבא: step1Due,
+        });
+        await sendReply(from, 'קיבלתי את כל הפרטים, תודה! ✨ הנה סרטון קצר שמסביר בדיוק על מה מדובר בפגישת הייעוץ:');
+        await sendVideo(from, process.env.MEETING_VIDEO_MEDIA_ID, 'פגישת הייעוץ האסטרטגית - מה מחכה לך 👇');
+      } else if (stage === 'ממתין_לתשובת_סקרנות') {
+        const segment = detectSegment(existingLead.data.קבלן_או_שיפוץ);
+        const wantsMore = text.includes('כן');
+
+        if (wantsMore) {
+          const content = getStepContent(3, segment);
+          await sendStepContent(from, content);
+          // מעקב_הבא כבר מכיל את המועד המתוכנן המקורי לשלב 3 - נשתמש בו כבסיס לחישוב שלב 4
+          const nextDue = new Date(
+            new Date(existingLead.data.מעקב_הבא).getTime() + getDeltaHours(4) * 60 * 60 * 1000
+          ).toISOString();
+          await updateLead(row, { שלב: 'סינון_הושלם', שלב_מעקב: '3', מעקב_הבא: nextDue, פנייה_אחרונה: now });
+        } else {
+          await sendReply(from, 'בסדר גמור, נמשיך בקרוב עם עוד תוכן שיעניין אותך 😊');
+          await updateLead(row, { שלב: 'סינון_הושלם', פנייה_אחרונה: now });
+        }
       } else {
         // ליד ידוע שכבר סיים את הסינון, או במצב לא מוכר - לא ממשיכים למכור אוטומטית
         await updateLead(row, { פנייה_אחרונה: now });
@@ -147,6 +202,59 @@ app.post('/webhook', async (req, res) => {
   }
 
   res.sendStatus(200);
+});
+
+// נקודת קצה שה"שעון" החיצוני קורא לה כל כמה דקות, כדי לבדוק ולשלוח סרטוני מעקב שהגיע זמנם
+app.get('/run-followups', async (req, res) => {
+  if (req.query.secret !== process.env.CRON_SECRET) {
+    return res.sendStatus(403);
+  }
+
+  try {
+    const leads = await getAllLeads();
+    const now = Date.now();
+    let sentCount = 0;
+
+    for (const lead of leads) {
+      if (lead.data.שלב !== 'סינון_הושלם') continue;
+      if (!lead.data.מעקב_הבא) continue;
+
+      const dueTime = new Date(lead.data.מעקב_הבא).getTime();
+      if (isNaN(dueTime) || now < dueTime) continue;
+
+      const segment = detectSegment(lead.data.קבלן_או_שיפוץ);
+      const currentStep = parseInt(lead.data.שלב_מעקב || '0', 10);
+      const nextStep = currentStep + 1;
+
+      if (nextStep > maxStepFor(segment)) continue;
+
+      const content = getStepContent(nextStep, segment);
+      await sendStepContent(lead.data.טלפון, content);
+      sentCount++;
+
+      const updates = { שלב_מעקב: String(nextStep) };
+
+      if (nextStep === 2) {
+        await sendReply(lead.data.טלפון, 'רוצה לראות עוד משהו מעניין? 👀');
+        updates.שלב = 'ממתין_לתשובת_סקרנות';
+      }
+
+      const nextDelta = getDeltaHours(nextStep + 1);
+      if (nextDelta) {
+        updates.מעקב_הבא = new Date(dueTime + nextDelta * 60 * 60 * 1000).toISOString();
+      } else {
+        updates.מעקב_הבא = '';
+      }
+
+      await updateLead(lead.rowNumber, updates);
+      console.log(`נשלח שלב מעקב ${nextStep} ל-${lead.data.טלפון}`);
+    }
+
+    res.send(`בוצע. נשלחו ${sentCount} הודעות מעקב.`);
+  } catch (err) {
+    console.log('שגיאה בהרצת המעקבים:', err.message);
+    res.sendStatus(500);
+  }
 });
 
 app.listen(PORT, () => {
