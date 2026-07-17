@@ -1,6 +1,11 @@
 require('dotenv').config();
 const express = require('express');
 const OpenAI = require('openai');
+const { findLeadByPhone, createLead, updateLead } = require('./sheets');
+
+// רשת ביטחון - מונעת קריסה מלאה של השרת אם משהו נכשל בלי טיפול
+process.on('uncaughtException', (err) => console.log('שגיאה לא מטופלת:', err));
+process.on('unhandledRejection', (err) => console.log('דחייה לא מטופלת:', err));
 
 const app = express();
 const PORT = 3000;
@@ -81,6 +86,21 @@ app.post('/webhook', async (req, res) => {
     const from = message.from;
     const text = message.text?.body;
     console.log(`התקבלה הודעה חדשה ממספר ${from}: "${text}"`);
+
+    try {
+      const now = new Date().toISOString();
+      const existingLead = await findLeadByPhone(from);
+
+      if (existingLead) {
+        await updateLead(existingLead.rowNumber, { פנייה_אחרונה: now });
+        console.log(`עודכן ליד קיים בשורה ${existingLead.rowNumber}`);
+      } else {
+        await createLead(from, { שלב: 'חדש', פנייה_אחרונה: now });
+        console.log('נוצר ליד חדש בגיליון');
+      }
+    } catch (err) {
+      console.log('שגיאה בעדכון הגיליון:', err.message);
+    }
 
     const aiReply = await getAIReply(text);
     await sendReply(from, aiReply);
