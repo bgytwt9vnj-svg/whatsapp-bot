@@ -125,6 +125,34 @@ async function sendStepContent(to, content) {
   }
 }
 
+const PAYMENT_INFO = `💳 פרטי תשלום לפגישת הייעוץ (1,200 ₪ כולל מע"מ):
+
+ביט: 0524275581
+
+העברה בנקאית:
+בנק הפועלים (12), סניף 170 (רוטשילד)
+מספר חשבון: 337344
+על שם: מאור ברקת
+
+לאחר התשלום נשמח לצילום מסך לאישור 🙏`;
+
+// בונה את הודעת אישור הפגישה הסופית ללקוח, כולל התאמה לזום/פרונטלי לפי סוג הליד
+function buildConfirmationMessage(segment) {
+  const meetingType =
+    segment === 'שיפוץ'
+      ? 'הפגישה תתקיים אצלכם בבית (כדי לראות את המרחב מקרוב).'
+      : 'הפגישה תתקיים בשיחת זום. חשוב להעביר לנו מראש את תכניות הבית 📐.';
+
+  return `מעולה, הפגישה אושרה! 🎉
+
+פגישת הייעוץ האסטרטגית שלנו, עד שעה וחצי, בשעה שביקשת.
+${meetingType}
+
+${PAYMENT_INFO}
+
+מחכים לך, זו הזדמנות מצוינת לקבל הכוונה מקצועית לפני שמתחילים בתהליך ✨`;
+}
+
 // Meta שולחת בקשת POST לכתובת הזו בכל פעם שמגיעה הודעה חדשה מלקוח
 app.post('/webhook', async (req, res) => {
   const entry = req.body.entry?.[0];
@@ -137,6 +165,37 @@ app.post('/webhook', async (req, res) => {
     console.log(`התקבלה הודעה חדשה ממספר ${from}: "${text}"`);
 
     try {
+      // הודעות מהמספר האישי של מאור נחשבות כפקודות ניהול, לא כליד
+      if (from === process.env.OWNER_PHONE) {
+        const match = text?.match(/^(אשר|דחה)\s+(\d+)/);
+
+        if (!match) {
+          await sendReply(from, 'פקודות זמינות: "אשר <מספר טלפון>" או "דחה <מספר טלפון>"');
+          return res.sendStatus(200);
+        }
+
+        const [, action, phone] = match;
+        const lead = await findLeadByPhone(phone);
+
+        if (!lead) {
+          await sendReply(from, `לא נמצא ליד עם המספר ${phone}`);
+          return res.sendStatus(200);
+        }
+
+        if (action === 'אשר') {
+          const segment = detectSegment(lead.data.קבלן_או_שיפוץ);
+          await updateLead(lead.rowNumber, { סטטוס_פגישה: 'מאושר', שלב: 'פגישה_מאושרת' });
+          await sendReply(phone, buildConfirmationMessage(segment));
+          await sendReply(from, `אושר ונשלח ללקוח ${phone} ✅`);
+        } else {
+          await updateLead(lead.rowNumber, { סטטוס_פגישה: 'נדחה', שלב: 'ממתין_לשעת_פגישה' });
+          await sendReply(phone, 'לצערנו השעה שביקשת לא מתאימה - תוכל להציע שעה אחרת שנוחה לך? 🙏');
+          await sendReply(from, `נדחה, נשלחה ללקוח ${phone} בקשה לשעה חלופית`);
+        }
+
+        return res.sendStatus(200);
+      }
+
       const now = nowFormatted();
       const existingLead = await findLeadByPhone(from);
 
@@ -187,6 +246,19 @@ app.post('/webhook', async (req, res) => {
           await sendReply(from, 'בסדר גמור, נמשיך בקרוב עם עוד תוכן שיעניין אותך 😊');
           await updateLead(row, { שלב: 'סינון_הושלם', פנייה_אחרונה: now });
         }
+      } else if (stage === 'סינון_הושלם') {
+        // הליד ממשיך לשוחח אחרי שקיבל את הסרטון הראשון - מזמינים אותו לקבוע פגישה
+        await updateLead(row, { שלב: 'ממתין_לשעת_פגישה', פנייה_אחרונה: now });
+        const aiReply = await getAIReply(text);
+        await sendReply(from, aiReply);
+        await sendReply(from, 'רוצה לקבוע את פגישת הייעוץ? באיזה יום ושעה נוח לך? 📅');
+      } else if (stage === 'ממתין_לשעת_פגישה') {
+        await updateLead(row, { שעה_מבוקשת: text, סטטוס_פגישה: 'ממתין_לאישור', שלב: 'ממתין_לאישור_בעלים', פנייה_אחרונה: now });
+        await sendReply(from, 'מעולה, אבדוק את הזמינות ואחזור אליך תוך זמן קצר עם אישור סופי 🙏');
+        await sendReply(
+          process.env.OWNER_PHONE,
+          `📅 בקשת פגישה חדשה!\nמספר: ${from}\nשעה מבוקשת: "${text}"\n\nהשב "אשר ${from}" לאישור, או "דחה ${from}" לבקש שעה אחרת.`
+        );
       } else {
         // ליד ידוע שכבר סיים את הסינון, או במצב לא מוכר - לא ממשיכים למכור אוטומטית
         await updateLead(row, { פנייה_אחרונה: now });
@@ -215,8 +287,9 @@ app.get('/run-followups', async (req, res) => {
     const now = Date.now();
     let sentCount = 0;
 
+    // ממשיכים לשלוח סרטוני מעקב גם ללידים שכבר מתקדמים בשיחה (למשל קובעים פגישה) -
+    // ההסתמכות היא על מעקב_הבא ושלב_מעקב, לא על שלב השיחה הנוכחי
     for (const lead of leads) {
-      if (lead.data.שלב !== 'סינון_הושלם') continue;
       if (!lead.data.מעקב_הבא) continue;
 
       const dueTime = new Date(lead.data.מעקב_הבא).getTime();
@@ -234,7 +307,9 @@ app.get('/run-followups', async (req, res) => {
 
       const updates = { שלב_מעקב: String(nextStep) };
 
-      if (nextStep === 2) {
+      // שואלים את שאלת הסקרנות רק אם הליד עדיין לא התקדם הלאה בשיחה (למשל כבר קובע פגישה) -
+      // כדי לא "לחטוף" לו את השיחה הפעילה
+      if (nextStep === 2 && lead.data.שלב === 'סינון_הושלם') {
         await sendReply(lead.data.טלפון, 'רוצה לראות עוד משהו מעניין? 👀');
         updates.שלב = 'ממתין_לתשובת_סקרנות';
       }
