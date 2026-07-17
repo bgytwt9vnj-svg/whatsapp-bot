@@ -90,6 +90,8 @@ app.post('/webhook', async (req, res) => {
     const text = message.text?.body;
     console.log(`התקבלה הודעה חדשה ממספר ${from}: "${text}"`);
 
+    let isNewLead = false;
+
     try {
       const now = new Date().toISOString();
       const existingLead = await findLeadByPhone(from);
@@ -98,15 +100,27 @@ app.post('/webhook', async (req, res) => {
         await updateLead(existingLead.rowNumber, { פנייה_אחרונה: now });
         console.log(`עודכן ליד קיים בשורה ${existingLead.rowNumber}`);
       } else {
+        isNewLead = true;
         await createLead(from, { שלב: 'חדש', פנייה_אחרונה: now });
         console.log('נוצר ליד חדש בגיליון');
       }
     } catch (err) {
       console.log('שגיאה בעדכון הגיליון:', err.message);
+      // אם לא הצלחנו לבדוק בגיליון, נניח ליתר ביטחון שזה לא ליד חדש
+      isNewLead = false;
     }
 
-    const aiReply = await getAIReply(text);
-    await sendReply(from, aiReply);
+    if (isNewLead) {
+      const aiReply = await getAIReply(text);
+      await sendReply(from, aiReply);
+    } else {
+      // מספר שכבר קיים אצלנו - לא נריץ עליו את המכירה האוטומטית, רק נעדכן את מאור
+      await sendReply(from, 'היי! קיבלנו את ההודעה שלך ונחזור אליך בהקדם 😊');
+      await sendReply(
+        process.env.OWNER_PHONE,
+        `⚠️ התקבלה הודעה ממספר קיים (${from}):\n"${text}"\n\nכדאי לבדוק את הסטטוס שלו לפני שהבוט ממשיך לדבר איתו.`
+      );
+    }
   }
 
   res.sendStatus(200);
