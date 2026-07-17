@@ -174,14 +174,25 @@ app.post('/webhook', async (req, res) => {
     try {
       // הודעות מהמספר האישי של מאור נחשבות כפקודות ניהול, לא כליד
       if (from === process.env.OWNER_PHONE) {
-        const match = text?.match(/^(אשר|דחה)\s+(\d+)/);
+        const approveMatch = text?.match(/^(אשר|דחה)\s+(\d+)/);
+        const sendMatch = text?.match(/^שלח\s+(\d+)\s+([\s\S]+)/);
 
-        if (!match) {
-          await sendReply(from, 'פקודות זמינות: "אשר <מספר טלפון>" או "דחה <מספר טלפון>"');
+        if (sendMatch) {
+          const [, phone, customMessage] = sendMatch;
+          await sendReply(phone, customMessage);
+          await sendReply(from, `נשלח ללקוח ${phone} ✅ (זה לא עוצר שום רצף אוטומטי אחר)`);
           return res.sendStatus(200);
         }
 
-        const [, action, phone] = match;
+        if (!approveMatch) {
+          await sendReply(
+            from,
+            'פקודות זמינות:\n"אשר <מספר טלפון>"\n"דחה <מספר טלפון>"\n"שלח <מספר טלפון> <הודעה חופשית>"'
+          );
+          return res.sendStatus(200);
+        }
+
+        const [, action, phone] = approveMatch;
         const lead = await findLeadByPhone(phone);
 
         if (!lead) {
@@ -219,6 +230,23 @@ app.post('/webhook', async (req, res) => {
 
       const stage = existingLead.data.שלב;
       const row = existingLead.rowNumber;
+
+      // ערוץ צד לבקשת שיחה טלפונית - לא נוגע בשלב הרגיל של השיחה, אז לא עוצר שום רצף אחר
+      if (existingLead.data.הערות === 'ממתין_לשעת_שיחה') {
+        await updateLead(row, { הערות: `בקשת שיחה טלפונית: ${text}`, פנייה_אחרונה: now });
+        await sendReply(from, 'תודה! נחזור אליך בטלפון בזמן שציינת 📞');
+        await sendReply(
+          process.env.OWNER_PHONE,
+          `📞 בקשת שיחה טלפונית!\nמספר: ${from}\nזמן מבוקש: "${text}"`
+        );
+        return res.sendStatus(200);
+      }
+
+      if (/תתקשר|התקשר|טלפון|לא ברור|להתקשר/.test(text || '')) {
+        await updateLead(row, { הערות: 'ממתין_לשעת_שיחה', פנייה_אחרונה: now });
+        await sendReply(from, 'כמובן, אפשר גם שנחזור אליך בטלפון - מתי נוח לך שנתקשר? 📞');
+        return res.sendStatus(200);
+      }
 
       if (stage === 'ממתין_לעיר') {
         await updateLead(row, { עיר: text, שלב: 'ממתין_למגורים_השקעה', פנייה_אחרונה: now });
