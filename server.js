@@ -15,7 +15,14 @@ app.use(express.json());
 
 // מחזירה תאריך ושעה נוכחיים בפורמט קריא, לפי שעון ישראל
 function nowFormatted() {
-  return new Date().toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' });
+  return new Date().toLocaleString('he-IL', {
+    timeZone: 'Asia/Jerusalem',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 // שולחת את הודעת הלקוח ל-OpenAI ומקבלת בחזרה תשובה חכמה
