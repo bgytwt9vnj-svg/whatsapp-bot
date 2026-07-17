@@ -83,7 +83,7 @@ async function sendReply(to, text) {
       messaging_product: 'whatsapp',
       to,
       type: 'text',
-      text: { body: text },
+      text: { body: text, preview_url: true },
     }),
   });
 
