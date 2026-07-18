@@ -436,26 +436,32 @@ app.post('/webhook', async (req, res) => {
           await sendReply(from, aiReply);
           await sendReply(from, 'בכל מקרה, בוא נקבע גם את פגישת הייעוץ - באיזה יום ושעה נוח לך? 📅');
           await updateLead(row, { פנייה_אחרונה: now });
-        } else if (isVagueTime(text)) {
-          await sendReply(from, 'רק כדי לוודא שנתפוס את הזמן הכי טוב - איזה יום בשבוע ובאיזו שעה בדיוק נוח? 🙏');
-          await updateLead(row, { פנייה_אחרונה: now });
         } else {
-          const analysis = await analyzeRequestedTime(text);
+          // מצרפים לתשובה הנוכחית כל מה שהלקוח כבר אמר קודם על יום/שעה בהודעות קודמות (שעה_מבוקשת משמש כאן כזיכרון זמני),
+          // כדי לא "לשכוח" אם היום והשעה הגיעו בשתי הודעות נפרדות
+          const combinedText = existingLead.data.שעה_מבוקשת ? `${existingLead.data.שעה_מבוקשת} ${text}` : text;
 
-          if (analysis.valid) {
-            // הזמן פנוי - מאשרים אוטומטית בלי לחכות לאישור ידני, ושומרים תאריך/שעה מסודרים בגיליון
-            await updateLead(row, {
-              שעה_מבוקשת: analysis.formatted,
-              סטטוס_פגישה: 'מאושר',
-              שלב: 'פגישה_מאושרת',
-              פנייה_אחרונה: now,
-            });
-            await sendReply(from, buildConfirmationMessage(text, analysis.formatted));
-            await sendReply(process.env.OWNER_PHONE, `📅 נקבעה פגישה אוטומטית!\nמספר: ${from}\nמועד: ${analysis.formatted}`);
+          if (isVagueTime(combinedText)) {
+            await sendReply(from, 'רק כדי לוודא שנתפוס את הזמן הכי טוב - איזה יום בשבוע ובאיזו שעה בדיוק נוח? 🙏');
+            await updateLead(row, { שעה_מבוקשת: combinedText, פנייה_אחרונה: now });
           } else {
-            // הזמן לא פנוי - מבקשים שעה אחרת בלי לחשוף את שעות הפעילות
-            await sendReply(from, 'לצערנו השעה הזו לא פנויה אצלנו - אפשר להציע יום ושעה אחרים? 🙏');
-            await updateLead(row, { פנייה_אחרונה: now });
+            const analysis = await analyzeRequestedTime(combinedText);
+
+            if (analysis.valid) {
+              // הזמן פנוי - מאשרים אוטומטית בלי לחכות לאישור ידני, ושומרים תאריך/שעה מסודרים בגיליון
+              await updateLead(row, {
+                שעה_מבוקשת: analysis.formatted,
+                סטטוס_פגישה: 'מאושר',
+                שלב: 'פגישה_מאושרת',
+                פנייה_אחרונה: now,
+              });
+              await sendReply(from, buildConfirmationMessage(combinedText, analysis.formatted));
+              await sendReply(process.env.OWNER_PHONE, `📅 נקבעה פגישה אוטומטית!\nמספר: ${from}\nמועד: ${analysis.formatted}`);
+            } else {
+              // הזמן לא פנוי - מבקשים שעה אחרת בלי לחשוף את שעות הפעילות, ומאפסים את הזיכרון הזמני
+              await sendReply(from, 'לצערנו השעה הזו לא פנויה אצלנו - אפשר להציע יום ושעה אחרים? 🙏');
+              await updateLead(row, { שעה_מבוקשת: '', פנייה_אחרונה: now });
+            }
           }
         }
       } else if (stage === 'ממתין_לאישור_בעלים') {
