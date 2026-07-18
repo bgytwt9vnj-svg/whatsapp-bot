@@ -271,7 +271,7 @@ app.post('/webhook', async (req, res) => {
           מעקב_הבא: step1Due,
         });
         await sendReply(from, 'קיבלתי את כל הפרטים, תודה! ✨ הנה סרטון קצר שמסביר בדיוק על מה מדובר בפגישת הייעוץ:');
-        await sendVideo(from, process.env.MEETING_VIDEO_MEDIA_ID, 'פגישת הייעוץ האסטרטגית - מה מחכה לך 👇');
+        await sendVideo(from, process.env.MEETING_VIDEO_MEDIA_ID, 'פגישת הייעוץ האסטרטגית - מה מחכה לך 👆');
       } else if (stage === 'ממתין_לתשובת_סקרנות') {
         const segment = detectSegment(existingLead.data.קבלן_או_שיפוץ);
         const wantsMore = text.includes('כן');
