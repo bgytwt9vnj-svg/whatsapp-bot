@@ -407,7 +407,7 @@ app.post('/webhook', async (req, res) => {
           'קיבלנו את כל הפרטים, תודה רבה! ✨ הנה סרטון קצר שמסביר בדיוק על מה מדובר בפגישת הייעוץ 👆'
         );
         // השהיה קטנה כדי לתת לווידאו (שלוקח יותר זמן לעבד ב-Meta) סיכוי טוב יותר להגיע לפני הטקסט שאחריו
-        await new Promise((resolve) => setTimeout(resolve, 4000));
+        await new Promise((resolve) => setTimeout(resolve, 8000));
         await sendReply(from, MEETING_DETAILS_WITH_CTA);
       } else if (stage === 'ממתין_לתשובת_סקרנות') {
         const segment = detectSegment(existingLead.data.קבלן_או_שיפוץ);
