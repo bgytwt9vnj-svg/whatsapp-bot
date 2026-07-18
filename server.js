@@ -265,13 +265,14 @@ app.post('/webhook', async (req, res) => {
         const step1Due = new Date(Date.now() + getDeltaHours(1) * 60 * 60 * 1000).toISOString();
         await updateLead(row, {
           קבלן_או_שיפוץ: text,
-          שלב: 'סינון_הושלם',
+          שלב: 'ממתין_לשעת_פגישה',
           פנייה_אחרונה: now,
           שלב_מעקב: '0',
           מעקב_הבא: step1Due,
         });
         await sendReply(from, 'קיבלתי את כל הפרטים, תודה! ✨ הנה סרטון קצר שמסביר בדיוק על מה מדובר בפגישת הייעוץ:');
         await sendVideo(from, process.env.MEETING_VIDEO_MEDIA_ID, 'פגישת הייעוץ האסטרטגית - מה מחכה לך 👆');
+        await sendReply(from, 'בוא נקבע כבר עכשיו את פגישת הייעוץ - באיזה יום ושעה נוח לך? 📅');
       } else if (stage === 'ממתין_לתשובת_סקרנות') {
         const segment = detectSegment(existingLead.data.קבלן_או_שיפוץ);
         const wantsMore = text.includes('כן');
