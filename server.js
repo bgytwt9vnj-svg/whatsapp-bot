@@ -302,6 +302,7 @@ app.post('/webhook', async (req, res) => {
       if (from === process.env.OWNER_PHONE) {
         const approveMatch = text?.match(/^(אשר|דחה)\s+(\d+)/);
         const sendMatch = text?.match(/^שלח\s+(\d+)\s+([\s\S]+)/);
+        const muteMatch = text?.match(/^(השתק|הפעל)\s+(\d+)/);
 
         if (sendMatch) {
           const [, phone, customMessage] = sendMatch;
@@ -310,10 +311,29 @@ app.post('/webhook', async (req, res) => {
           return res.sendStatus(200);
         }
 
+        if (muteMatch) {
+          const [, action, phone] = muteMatch;
+          const lead = await findLeadByPhone(phone);
+
+          if (!lead) {
+            await sendReply(from, `לא נמצא ליד עם המספר ${phone}`);
+            return res.sendStatus(200);
+          }
+
+          if (action === 'השתק') {
+            await updateLead(lead.rowNumber, { בקרת_בוט: 'מושתק' });
+            await sendReply(from, `הבוט הושתק עבור ${phone} - אתה בשליטה עכשיו. סרטוני המעקב עדיין ימשיכו להישלח כרגיל. השב "הפעל ${phone}" כדי להחזיר את הבוט.`);
+          } else {
+            await updateLead(lead.rowNumber, { בקרת_בוט: '' });
+            await sendReply(from, `הבוט הופעל מחדש עבור ${phone} ✅`);
+          }
+          return res.sendStatus(200);
+        }
+
         if (!approveMatch) {
           await sendReply(
             from,
-            'פקודות זמינות:\n"אשר <מספר טלפון>"\n"דחה <מספר טלפון>"\n"שלח <מספר טלפון> <הודעה חופשית>"'
+            'פקודות זמינות:\n"אשר <מספר טלפון>"\n"דחה <מספר טלפון>"\n"שלח <מספר טלפון> <הודעה חופשית>"\n"השתק <מספר טלפון>"\n"הפעל <מספר טלפון>"'
           );
           return res.sendStatus(200);
         }
@@ -356,6 +376,14 @@ app.post('/webhook', async (req, res) => {
 
       const stage = existingLead.data.שלב;
       const row = existingLead.rowNumber;
+
+      // הבוט מושתק עבור הליד הזה - מאור מטפל בו אישית. לא שולחים שום תגובה אוטומטית, רק מתריעים לו,
+      // וסרטוני המעקב האוטומטיים ממשיכים כרגיל (הם לא בודקים את הדגל הזה בכלל)
+      if (existingLead.data.בקרת_בוט === 'מושתק') {
+        await updateLead(row, { פנייה_אחרונה: now });
+        await sendReply(process.env.OWNER_PHONE, `🔇 (בוט מושתק) הודעה ממספר ${from}:\n"${text}"`);
+        return res.sendStatus(200);
+      }
 
       if (stage === 'ממתין_לשם') {
         await updateLead(row, { שם: text, שלב: 'ממתין_לעיר', פנייה_אחרונה: now });
