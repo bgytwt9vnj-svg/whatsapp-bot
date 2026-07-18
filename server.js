@@ -26,9 +26,10 @@ function nowFormatted() {
   });
 }
 
-// בודקת (בעזרת AI) אם הזמן שהלקוח ביקש בטקסט חופשי נופל בטווח הזמינות שלנו:
-// ימי שני-חמישי, 11:00-20:00, החל ממחר. לא חושפת את הכלל ללקוח - רק מחזירה true/false
-async function isTimeWithinAvailability(requestedTimeText) {
+// בודקת (בעזרת AI) אם הזמן שהלקוח ביקש בטקסט חופשי נופל בטווח הזמינות שלנו,
+// ואם כן - מחזירה גם תאריך ושעה מסודרים לשמירה בגיליון. לא חושפת את הכלל ללקוח.
+// ימי שני-חמישי, 11:00-20:00, החל ממחר.
+async function analyzeRequestedTime(requestedTimeText) {
   const todayIsrael = new Date().toLocaleString('he-IL', {
     timeZone: 'Asia/Jerusalem',
     weekday: 'long',
@@ -43,7 +44,7 @@ async function isTimeWithinAvailability(requestedTimeText) {
     messages: [
       {
         role: 'system',
-        content: `היום ${todayIsrael} (לפי שעון ישראל). זמנים פנויים לקביעת פגישות: ימי שני עד חמישי בלבד, בין השעות 11:00-20:00, החל ממחר ואילך (לא היום, ולא סוף השבוע - שישי/שבת/ראשון תמיד לא פנויים). נתחו את הבקשה של הלקוח וקבעו אם היא נופלת בטווח הזה. אם היא לא ברורה מספיק כדי לקבוע בביטחון, החזירו valid: false. ענו אך ורק ב-JSON בפורמט: {"valid": true} או {"valid": false}`,
+        content: `היום ${todayIsrael} (לפי שעון ישראל). זמנים פנויים לקביעת פגישות: ימי שני עד חמישי בלבד, בין השעות 11:00-20:00, החל ממחר ואילך (לא היום, ולא סוף השבוע - שישי/שבת/ראשון תמיד לא פנויים). נתחו את הבקשה של הלקוח וקבעו אם היא נופלת בטווח הזה. אם היא לא ברורה מספיק כדי לקבוע בביטחון, החזירו valid: false. אם valid: true, חשבו את התאריך הקלנדרי המדויק (לפי היום הנוכחי) וספקו אותו בשדה formatted, בפורמט: "יום X, DD.MM.YYYY, HH:MM". ענו אך ורק ב-JSON: {"valid": true, "formatted": "..."} או {"valid": false}`,
       },
       { role: 'user', content: requestedTimeText },
     ],
@@ -51,9 +52,12 @@ async function isTimeWithinAvailability(requestedTimeText) {
 
   try {
     const result = JSON.parse(completion.choices[0].message.content);
-    return result.valid === true;
+    if (result.valid === true && result.formatted) {
+      return { valid: true, formatted: result.formatted };
+    }
+    return { valid: false };
   } catch {
-    return false;
+    return { valid: false };
   }
 }
 
@@ -259,7 +263,7 @@ function isInPersonRequested(requestedTimeText) {
 }
 
 // בונה את הודעת אישור הפגישה הסופית ללקוח, כולל התאמה לזום (ברירת מחדל) או פרונטלי (רק אם ביקשו)
-function buildConfirmationMessage(requestedTimeText) {
+function buildConfirmationMessage(requestedTimeText, formattedTime) {
   const inPerson = isInPersonRequested(requestedTimeText);
   const meetingType = inPerson
     ? 'הפגישה תתקיים פנים אל פנים ברמת גן.'
@@ -268,7 +272,7 @@ function buildConfirmationMessage(requestedTimeText) {
 
   return `מעולה, הפגישה אושרה! 🎉
 
-פגישת הייעוץ האסטרטגית שלנו, עד שעה-שעתיים, בשעה שביקשת.
+פגישת הייעוץ האסטרטגית שלנו, עד שעה-שעתיים, ב-${formattedTime || 'המועד שביקשת'}.
 ${meetingType}
 
 ${buildPaymentInfo(price)}
@@ -318,7 +322,7 @@ app.post('/webhook', async (req, res) => {
 
         if (action === 'אשר') {
           await updateLead(lead.rowNumber, { סטטוס_פגישה: 'מאושר', שלב: 'פגישה_מאושרת' });
-          await sendReply(phone, buildConfirmationMessage(lead.data.שעה_מבוקשת));
+          await sendReply(phone, buildConfirmationMessage(lead.data.שעה_מבוקשת, lead.data.שעה_מבוקשת));
           await sendReply(from, `אושר ונשלח ללקוח ${phone} ✅`);
         } else {
           await updateLead(lead.rowNumber, { סטטוס_פגישה: 'נדחה', שלב: 'ממתין_לשעת_פגישה' });
@@ -424,13 +428,18 @@ app.post('/webhook', async (req, res) => {
           await sendReply(from, 'רק כדי לוודא שנתפוס לך את הזמן הכי טוב - איזה יום בשבוע ובאיזו שעה בדיוק נוח לך? 🙏');
           await updateLead(row, { פנייה_אחרונה: now });
         } else {
-          const available = await isTimeWithinAvailability(text);
+          const analysis = await analyzeRequestedTime(text);
 
-          if (available) {
-            // הזמן פנוי - מאשרים אוטומטית בלי לחכות לאישור ידני
-            await updateLead(row, { שעה_מבוקשת: text, סטטוס_פגישה: 'מאושר', שלב: 'פגישה_מאושרת', פנייה_אחרונה: now });
-            await sendReply(from, buildConfirmationMessage(text));
-            await sendReply(process.env.OWNER_PHONE, `📅 נקבעה פגישה אוטומטית!\nמספר: ${from}\nשעה: "${text}"`);
+          if (analysis.valid) {
+            // הזמן פנוי - מאשרים אוטומטית בלי לחכות לאישור ידני, ושומרים תאריך/שעה מסודרים בגיליון
+            await updateLead(row, {
+              שעה_מבוקשת: analysis.formatted,
+              סטטוס_פגישה: 'מאושר',
+              שלב: 'פגישה_מאושרת',
+              פנייה_אחרונה: now,
+            });
+            await sendReply(from, buildConfirmationMessage(text, analysis.formatted));
+            await sendReply(process.env.OWNER_PHONE, `📅 נקבעה פגישה אוטומטית!\nמספר: ${from}\nמועד: ${analysis.formatted}`);
           } else {
             // הזמן לא פנוי - מבקשים שעה אחרת בלי לחשוף את שעות הפעילות
             await sendReply(from, 'לצערנו השעה הזו לא פנויה אצלנו - תוכל להציע יום ושעה אחרים? 🙏');
