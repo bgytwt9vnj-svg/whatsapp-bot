@@ -390,8 +390,11 @@ app.post('/webhook', async (req, res) => {
           שלב_מעקב: '0',
           מעקב_הבא: step1Due,
         });
-        await sendReply(from, 'קיבלנו את כל הפרטים, תודה רבה! ✨ הכנו בשבילך סרטון קצר שמסביר בדיוק על מה מדובר בפגישת הייעוץ:');
-        await sendVideo(from, process.env.MEETING_VIDEO_MEDIA_ID, 'פגישת הייעוץ האסטרטגית - מה מחכה לך 👆');
+        await sendVideo(
+          from,
+          process.env.MEETING_VIDEO_MEDIA_ID,
+          'קיבלנו את כל הפרטים, תודה רבה! ✨ הנה סרטון קצר שמסביר בדיוק על מה מדובר בפגישת הייעוץ 👆'
+        );
         await sendReply(from, MEETING_DETAILS_WITH_CTA);
       } else if (stage === 'ממתין_לתשובת_סקרנות') {
         const segment = detectSegment(existingLead.data.קבלן_או_שיפוץ);
