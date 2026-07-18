@@ -333,18 +333,24 @@ app.post('/webhook', async (req, res) => {
 
       if (!existingLead) {
         // ליד חדש לגמרי - מתחילים את זרימת הסינון
-        await createLead(from, { שלב: 'ממתין_לעיר', פנייה_אחרונה: now });
+        await createLead(from, { שלב: 'ממתין_לשם', פנייה_אחרונה: now });
         console.log('נוצר ליד חדש בגיליון, מתחיל שאלון סינון');
 
         await sendReply(from, 'איזה כיף שהגעת אלינו! 💫 הגעת בדיוק למקום הנכון - הצוות שלנו כאן ללוות ולעזור בכל שלב 🤍');
         const aiReply = await getAIReply(text);
         await sendReply(from, aiReply);
-        await sendReply(from, 'נשמח להכיר את הפרויקט טוב יותר - באיזה עיר הוא נמצא? 🏙️');
+        await sendReply(from, 'לפני שממשיכים, מה השם המלא? 😊');
         return res.sendStatus(200);
       }
 
       const stage = existingLead.data.שלב;
       const row = existingLead.rowNumber;
+
+      if (stage === 'ממתין_לשם') {
+        await updateLead(row, { שם: text, שלב: 'ממתין_לעיר', פנייה_אחרונה: now });
+        await sendReply(from, `נעים מאוד! נשמח להכיר את הפרויקט טוב יותר - באיזה עיר הוא נמצא? 🏙️`);
+        return res.sendStatus(200);
+      }
 
       // ערוץ צד לבקשת שיחה טלפונית - לא נוגע בשלב הרגיל של השיחה, אז לא עוצר שום רצף אחר
       if (existingLead.data.הערות === 'ממתין_לשעת_שיחה') {
