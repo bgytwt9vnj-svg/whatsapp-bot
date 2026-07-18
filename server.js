@@ -26,6 +26,37 @@ function nowFormatted() {
   });
 }
 
+// בודקת (בעזרת AI) אם הזמן שהלקוח ביקש בטקסט חופשי נופל בטווח הזמינות שלנו:
+// ימי שני-חמישי, 11:00-20:00, החל ממחר. לא חושפת את הכלל ללקוח - רק מחזירה true/false
+async function isTimeWithinAvailability(requestedTimeText) {
+  const todayIsrael = new Date().toLocaleString('he-IL', {
+    timeZone: 'Asia/Jerusalem',
+    weekday: 'long',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: `היום ${todayIsrael} (לפי שעון ישראל). זמנים פנויים לקביעת פגישות: ימי שני עד חמישי בלבד, בין השעות 11:00-20:00, החל ממחר ואילך (לא היום, ולא סוף השבוע - שישי/שבת/ראשון תמיד לא פנויים). נתחו את הבקשה של הלקוח וקבעו אם היא נופלת בטווח הזה. אם היא לא ברורה מספיק כדי לקבוע בביטחון, החזירו valid: false. ענו אך ורק ב-JSON בפורמט: {"valid": true} או {"valid": false}`,
+      },
+      { role: 'user', content: requestedTimeText },
+    ],
+  });
+
+  try {
+    const result = JSON.parse(completion.choices[0].message.content);
+    return result.valid === true;
+  } catch {
+    return false;
+  }
+}
+
 const MEETING_DETAILS = `בפגישת הייעוץ האסטרטגית (בין שעה לשעתיים), המבוססת על 18 שנות ניסיון, נעבור על:
 
 🏡 הבנת הצרכים, אורח החיים והחזון שלכם לבית.
@@ -33,7 +64,13 @@ const MEETING_DETAILS = `בפגישת הייעוץ האסטרטגית (בין ש
 💡 קבלת החלטות קריטיות מראש בנושאי חשמל, תאורה, אינסטלציה, מיזוג ועוד.
 🚫 זיהוי טעויות יקרות שעלולות לעלות עשרות אלפי שקלים - ואיך להימנע מהן.
 ✨ רעיונות ופתרונות יצירתיים המותאמים במיוחד לבית שלכם.
-📝 תוכנית פעולה ברורה ומסודרת להמשך הדרך, כדי שתדעו בדיוק מה לעשות ובאיזה סדר.`;
+📝 תוכנית פעולה ברורה ומסודרת להמשך הדרך, כדי שתדעו בדיוק מה לעשות ובאיזה סדר.
+
+💡 טיפ חשוב: ברגע שמתחילות חתימות מול הקבלן, כבר מאוחר מדי לשנות הרבה - פגישה מוקדמת חוסכת כאב ראש (וכסף) בהמשך.`;
+
+const MEETING_DETAILS_WITH_CTA = `${MEETING_DETAILS}
+
+הפגישה מתקיימת בשיחת זום נוחה 💻 (כלול במחיר). בוא נקבע כבר עכשיו - באיזה יום ושעה נוח לך? 📅`;
 
 // שולחת את הודעת הלקוח ל-OpenAI ומקבלת בחזרה תשובה חכמה. context הוא תיאור קצר של מצב הליד הנוכחי, כדי שהתשובה לא תישמע כמו פתיחת שיחה חדשה
 async function getAIReply(customerText, context = '') {
@@ -349,9 +386,7 @@ app.post('/webhook', async (req, res) => {
         });
         await sendReply(from, 'קיבלנו את כל הפרטים, תודה רבה! ✨ הכנו בשבילך סרטון קצר שמסביר בדיוק על מה מדובר בפגישת הייעוץ:');
         await sendVideo(from, process.env.MEETING_VIDEO_MEDIA_ID, 'פגישת הייעוץ האסטרטגית - מה מחכה לך 👆');
-        await sendReply(from, MEETING_DETAILS);
-        await sendReply(from, 'הפגישה מתקיימת בשיחת זום נוחה 💻 (וזה כלול במחיר).');
-        await sendReply(from, 'בוא נקבע כבר עכשיו את פגישת הייעוץ - באיזה יום ושעה נוח לך? 📅');
+        await sendReply(from, MEETING_DETAILS_WITH_CTA);
       } else if (stage === 'ממתין_לתשובת_סקרנות') {
         const segment = detectSegment(existingLead.data.קבלן_או_שיפוץ);
         const wantsMore = text.includes('כן');
@@ -379,12 +414,18 @@ app.post('/webhook', async (req, res) => {
           await sendReply(from, 'רק כדי לוודא שנתפוס לך את הזמן הכי טוב - איזה יום בשבוע ובאיזו שעה בדיוק נוח לך? 🙏');
           await updateLead(row, { פנייה_אחרונה: now });
         } else {
-          await updateLead(row, { שעה_מבוקשת: text, סטטוס_פגישה: 'ממתין_לאישור', שלב: 'ממתין_לאישור_בעלים', פנייה_אחרונה: now });
-          await sendReply(from, 'מעולה, נבדוק את הזמינות ונחזור אליך תוך זמן קצר עם אישור סופי 🙏');
-          await sendReply(
-            process.env.OWNER_PHONE,
-            `📅 בקשת פגישה חדשה!\nמספר: ${from}\nשעה מבוקשת: "${text}"\n\nהשב "אשר ${from}" לאישור, או "דחה ${from}" לבקש שעה אחרת.`
-          );
+          const available = await isTimeWithinAvailability(text);
+
+          if (available) {
+            // הזמן פנוי - מאשרים אוטומטית בלי לחכות לאישור ידני
+            await updateLead(row, { שעה_מבוקשת: text, סטטוס_פגישה: 'מאושר', שלב: 'פגישה_מאושרת', פנייה_אחרונה: now });
+            await sendReply(from, buildConfirmationMessage(text));
+            await sendReply(process.env.OWNER_PHONE, `📅 נקבעה פגישה אוטומטית!\nמספר: ${from}\nשעה: "${text}"`);
+          } else {
+            // הזמן לא פנוי - מבקשים שעה אחרת בלי לחשוף את שעות הפעילות
+            await sendReply(from, 'לצערנו השעה הזו לא פנויה אצלנו - תוכל להציע יום ושעה אחרים? 🙏');
+            await updateLead(row, { פנייה_אחרונה: now });
+          }
         }
       } else if (stage === 'ממתין_לאישור_בעלים') {
         // כבר ביקש שעה וממתין לאישור שלנו - לא פותחים שיחה מחדש, רק מרגיעים

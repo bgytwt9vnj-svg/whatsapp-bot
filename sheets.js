@@ -54,14 +54,21 @@ async function findLeadByPhone(phone) {
   return null;
 }
 
-// יוצרת שורת ליד חדשה בסוף הגיליון
+// יוצרת שורת ליד חדשה - כותבת לשורה ריקה מדויקת בסוף הגיליון (לא סומכת על "ניחוש" של Sheets היכן להוסיף,
+// כדי שלא ייכתב בעמודה הלא נכונה אם יש שורות ריקות/פגומות בגיליון)
 async function createLead(phone, fields = {}) {
   const sheets = await getSheetsClient();
   const row = COLUMNS.map((col) => (col === 'טלפון' ? phone : fields[col] || ''));
 
-  await sheets.spreadsheets.values.append({
+  const existing = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A:L`,
+    range: `${SHEET_NAME}!A:A`,
+  });
+  const nextRow = (existing.data.values || []).length + 1;
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SHEET_ID,
+    range: `${SHEET_NAME}!A${nextRow}:L${nextRow}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [row] },
   });
