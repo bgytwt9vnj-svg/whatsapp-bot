@@ -261,7 +261,7 @@ app.post('/webhook', async (req, res) => {
         await sendReply(from, 'איזה כיף שהגעת אלינו! 💫 הגעת בדיוק למקום הנכון - הצוות שלנו כאן ללוות ולעזור בכל שלב 🤍');
         const aiReply = await getAIReply(text);
         await sendReply(from, aiReply);
-        await sendReply(from, 'לפני שממשיכים - באיזה עיר נמצא הפרויקט? 🏙️');
+        await sendReply(from, 'נשמח להכיר את הפרויקט טוב יותר - באיזה עיר הוא נמצא? 🏙️');
         return res.sendStatus(200);
       }
 
@@ -271,7 +271,7 @@ app.post('/webhook', async (req, res) => {
       // ערוץ צד לבקשת שיחה טלפונית - לא נוגע בשלב הרגיל של השיחה, אז לא עוצר שום רצף אחר
       if (existingLead.data.הערות === 'ממתין_לשעת_שיחה') {
         await updateLead(row, { הערות: `בקשת שיחה טלפונית: ${text}`, פנייה_אחרונה: now });
-        await sendReply(from, 'תודה! נחזור אליך בטלפון בזמן שציינת 📞');
+        await sendReply(from, 'תודה! הצוות שלנו יחזור אליך בטלפון בזמן שציינת 📞');
         await sendReply(
           process.env.OWNER_PHONE,
           `📞 בקשת שיחה טלפונית!\nמספר: ${from}\nזמן מבוקש: "${text}"`
@@ -281,7 +281,7 @@ app.post('/webhook', async (req, res) => {
 
       if (/תתקשר|התקשר|טלפון|לא ברור|להתקשר/.test(text || '')) {
         await updateLead(row, { הערות: 'ממתין_לשעת_שיחה', פנייה_אחרונה: now });
-        await sendReply(from, 'כמובן, אפשר גם שנחזור אליך בטלפון - מתי נוח לך שנתקשר? 📞');
+        await sendReply(from, 'בשמחה! מתי יהיה נוח שנתקשר אליך? 📞');
         return res.sendStatus(200);
       }
 
@@ -306,7 +306,7 @@ app.post('/webhook', async (req, res) => {
           שלב_מעקב: '0',
           מעקב_הבא: step1Due,
         });
-        await sendReply(from, 'קיבלתי את כל הפרטים, תודה! ✨ הנה סרטון קצר שמסביר בדיוק על מה מדובר בפגישת הייעוץ:');
+        await sendReply(from, 'קיבלנו את כל הפרטים, תודה רבה! ✨ הכנו בשבילך סרטון קצר שמסביר בדיוק על מה מדובר בפגישת הייעוץ:');
         await sendVideo(from, process.env.MEETING_VIDEO_MEDIA_ID, 'פגישת הייעוץ האסטרטגית - מה מחכה לך 👆');
         await sendReply(from, 'בוא נקבע כבר עכשיו את פגישת הייעוץ - באיזה יום ושעה נוח לך? 📅');
       } else if (stage === 'ממתין_לתשובת_סקרנות') {
@@ -333,7 +333,7 @@ app.post('/webhook', async (req, res) => {
         await sendReply(from, 'רוצה לקבוע את פגישת הייעוץ? באיזה יום ושעה נוח לך? 📅');
       } else if (stage === 'ממתין_לשעת_פגישה') {
         await updateLead(row, { שעה_מבוקשת: text, סטטוס_פגישה: 'ממתין_לאישור', שלב: 'ממתין_לאישור_בעלים', פנייה_אחרונה: now });
-        await sendReply(from, 'מעולה, אבדוק את הזמינות ואחזור אליך תוך זמן קצר עם אישור סופי 🙏');
+        await sendReply(from, 'מעולה, נבדוק את הזמינות ונחזור אליך תוך זמן קצר עם אישור סופי 🙏');
         await sendReply(
           process.env.OWNER_PHONE,
           `📅 בקשת פגישה חדשה!\nמספר: ${from}\nשעה מבוקשת: "${text}"\n\nהשב "אשר ${from}" לאישור, או "דחה ${from}" לבקש שעה אחרת.`
