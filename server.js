@@ -130,6 +130,34 @@ async function sendVideo(to, mediaId, caption) {
   console.log('תשובת שליחת וידאו מ-Meta:', JSON.stringify(data));
 }
 
+// שולחת הודעה עם עד 3 כפתורי בחירה מהירה (buttons = [{id, title}, ...])
+async function sendButtons(to, bodyText, buttons) {
+  const url = `https://graph.facebook.com/v21.0/${process.env.PHONE_NUMBER_ID}/messages`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: bodyText },
+        action: {
+          buttons: buttons.map((b) => ({ type: 'reply', reply: { id: b.id, title: b.title } })),
+        },
+      },
+    }),
+  });
+
+  const data = await response.json();
+  console.log('תשובת שליחת כפתורים מ-Meta:', JSON.stringify(data));
+}
+
 // שולחת תוכן של שלב מעקב (קישור או סרטון) ללקוח
 async function sendStepContent(to, content) {
   if (!content) return;
@@ -176,7 +204,7 @@ app.post('/webhook', async (req, res) => {
 
   if (message) {
     const from = message.from;
-    const text = message.text?.body;
+    const text = message.text?.body || message.interactive?.button_reply?.title;
     console.log(`התקבלה הודעה חדשה ממספר ${from}: "${text}"`);
 
     try {
@@ -258,10 +286,16 @@ app.post('/webhook', async (req, res) => {
 
       if (stage === 'ממתין_לעיר') {
         await updateLead(row, { עיר: text, שלב: 'ממתין_למגורים_השקעה', פנייה_אחרונה: now });
-        await sendReply(from, 'שמח שהצטרפת! 😊 בוא נכיר את הפרויקט טוב יותר - זה למגורים או להשקעה? 🏠💰');
+        await sendButtons(from, 'שמח שהצטרפת! 😊 בוא נכיר את הפרויקט טוב יותר - זה למגורים או להשקעה? 🏠💰', [
+          { id: 'residential', title: 'למגורים' },
+          { id: 'investment', title: 'להשקעה' },
+        ]);
       } else if (stage === 'ממתין_למגורים_השקעה') {
         await updateLead(row, { מגורים_או_השקעה: text, שלב: 'ממתין_לקבלן_שיפוץ', פנייה_אחרונה: now });
-        await sendReply(from, 'מעולה, תודה על השיתוף! עוד שאלה קטנה - זה בית מקבלן לפני כניסה, או שמתכננים לשפץ/לתכנן אותו מחדש? 🔨');
+        await sendButtons(from, 'מעולה, תודה על השיתוף! עוד שאלה קטנה - זה בית מקבלן לפני כניסה, או שמתכננים לשפץ/לתכנן אותו מחדש? 🔨', [
+          { id: 'contractor', title: 'קבלן (לפני כניסה)' },
+          { id: 'renovation', title: 'שיפוץ/תכנון מחדש' },
+        ]);
       } else if (stage === 'ממתין_לקבלן_שיפוץ') {
         const step1Due = new Date(Date.now() + getDeltaHours(1) * 60 * 60 * 1000).toISOString();
         await updateLead(row, {
@@ -354,7 +388,10 @@ app.get('/run-followups', async (req, res) => {
       // שואלים את שאלת הסקרנות רק אם הליד עדיין לא התקדם הלאה בשיחה (למשל כבר קובע פגישה) -
       // כדי לא "לחטוף" לו את השיחה הפעילה
       if (nextStep === 2 && lead.data.שלב === 'סינון_הושלם') {
-        await sendReply(lead.data.טלפון, 'רוצה לראות עוד משהו מעניין? 👀');
+        await sendButtons(lead.data.טלפון, 'רוצה לראות עוד משהו מעניין? 👀', [
+          { id: 'yes_more', title: 'כן, מעניין!' },
+          { id: 'no_thanks', title: 'לא תודה' },
+        ]);
         updates.שלב = 'ממתין_לתשובת_סקרנות';
       }
 
