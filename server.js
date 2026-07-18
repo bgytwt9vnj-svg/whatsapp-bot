@@ -336,7 +336,7 @@ app.post('/webhook', async (req, res) => {
         await createLead(from, { שלב: 'ממתין_לשם', פנייה_אחרונה: now });
         console.log('נוצר ליד חדש בגיליון, מתחיל שאלון סינון');
 
-        await sendReply(from, 'איזה כיף שהגעת אלינו! 💫 הגעת בדיוק למקום הנכון - הצוות שלנו כאן ללוות ולעזור בכל שלב 🤍');
+        await sendReply(from, 'איזה כיף שהגעת אלינו למאור ברקת עיצוב ותכנון! 💫 הגעת בדיוק למקום הנכון - הצוות שלנו כאן ללוות ולעזור בכל שלב 🤍');
         const aiReply = await getAIReply(text);
         await sendReply(from, aiReply);
         await sendReply(from, 'לפני שממשיכים, מה השם המלא? 😊');
