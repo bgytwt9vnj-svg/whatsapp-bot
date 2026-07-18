@@ -380,7 +380,9 @@ app.post('/webhook', async (req, res) => {
       // הבוט מושתק עבור הליד הזה - מאור מטפל בו אישית. לא שולחים שום תגובה אוטומטית, רק מתריעים לו,
       // וסרטוני המעקב האוטומטיים ממשיכים כרגיל (הם לא בודקים את הדגל הזה בכלל)
       if (existingLead.data.בקרת_בוט === 'מושתק') {
-        await updateLead(row, { פנייה_אחרונה: now });
+        const logLine = `[${now}] ${text}`;
+        const updatedNotes = existingLead.data.הערות ? `${existingLead.data.הערות}\n${logLine}` : logLine;
+        await updateLead(row, { פנייה_אחרונה: now, הערות: updatedNotes });
         await sendReply(process.env.OWNER_PHONE, `🔇 (בוט מושתק) הודעה ממספר ${from}:\n"${text}"`);
         return res.sendStatus(200);
       }
