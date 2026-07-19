@@ -26,6 +26,24 @@ function nowFormatted() {
   });
 }
 
+// אם זמן שליחה מתוזמן (רק לסרטוני מעקב, לא להודעות שיחה חיות) נופל בשעות שקטות (21:00-09:00 לפי שעון ישראל),
+// דוחה אותו לשעה 09:00 הקרובה - כדי לא לשלוח הודעות באמצע הלילה
+function adjustToBusinessHours(timestampMs) {
+  const israelHour = parseInt(
+    new Date(timestampMs).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem', hour: '2-digit', hour12: false }),
+    10
+  );
+
+  let hoursToAdd = 0;
+  if (israelHour >= 21) {
+    hoursToAdd = 24 - israelHour + 9;
+  } else if (israelHour < 9) {
+    hoursToAdd = 9 - israelHour;
+  }
+
+  return timestampMs + hoursToAdd * 60 * 60 * 1000;
+}
+
 // בודקת (בעזרת AI) אם הזמן שהלקוח ביקש בטקסט חופשי נופל בטווח הזמינות שלנו,
 // ואם כן - מחזירה גם תאריך ושעה מסודרים לשמירה בגיליון. לא חושפת את הכלל ללקוח.
 // ימי שני-חמישי, 11:00-20:00, החל ממחר.
@@ -423,7 +441,9 @@ app.post('/webhook', async (req, res) => {
           { id: 'renovation', title: 'שיפוץ/תכנון מחדש' },
         ]);
       } else if (stage === 'ממתין_לקבלן_שיפוץ') {
-        const step1Due = new Date(Date.now() + getDeltaHours(1) * 60 * 60 * 1000).toISOString();
+        const step1Due = new Date(
+          adjustToBusinessHours(Date.now() + getDeltaHours(1) * 60 * 60 * 1000)
+        ).toISOString();
         await updateLead(row, {
           קבלן_או_שיפוץ: text,
           שלב: 'ממתין_לשעת_פגישה',
@@ -448,7 +468,7 @@ app.post('/webhook', async (req, res) => {
           await sendStepContent(from, content);
           // מעקב_הבא כבר מכיל את המועד המתוכנן המקורי לשלב 3 - נשתמש בו כבסיס לחישוב שלב 4
           const nextDue = new Date(
-            new Date(existingLead.data.מעקב_הבא).getTime() + getDeltaHours(4) * 60 * 60 * 1000
+            adjustToBusinessHours(new Date(existingLead.data.מעקב_הבא).getTime() + getDeltaHours(4) * 60 * 60 * 1000)
           ).toISOString();
           await updateLead(row, { שלב: 'סינון_הושלם', שלב_מעקב: '3', מעקב_הבא: nextDue, פנייה_אחרונה: now });
         } else {
@@ -562,7 +582,7 @@ app.get('/run-followups', async (req, res) => {
 
       const nextDelta = getDeltaHours(nextStep + 1);
       if (nextDelta) {
-        updates.מעקב_הבא = new Date(dueTime + nextDelta * 60 * 60 * 1000).toISOString();
+        updates.מעקב_הבא = new Date(adjustToBusinessHours(dueTime + nextDelta * 60 * 60 * 1000)).toISOString();
       } else {
         updates.מעקב_הבא = '';
       }
