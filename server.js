@@ -413,7 +413,18 @@ app.post('/webhook', async (req, res) => {
           await updateLead(row, { פנייה_אחרונה: now });
           return res.sendStatus(200);
         }
-        await updateLead(row, { שם: text, שלב: 'ממתין_לעיר', פנייה_אחרונה: now });
+
+        // מצרפים לשם שכבר התחיל להצטבר (למשל אם שם פרטי ושם משפחה הגיעו בשתי הודעות נפרדות)
+        const combinedName = existingLead.data.שם ? `${existingLead.data.שם} ${text}` : text;
+
+        if (!combinedName.trim().includes(' ')) {
+          // רק מילה אחת - כנראה שם פרטי בלבד, נבקש גם שם משפחה במקום לעבור הלאה
+          await sendReply(from, 'ומה שם המשפחה? 😊');
+          await updateLead(row, { שם: combinedName, פנייה_אחרונה: now });
+          return res.sendStatus(200);
+        }
+
+        await updateLead(row, { שם: combinedName, שלב: 'ממתין_לעיר', פנייה_אחרונה: now });
         await sendReply(from, `נעים מאוד! נשמח להכיר את הפרויקט טוב יותר - באיזה עיר הוא נמצא? 🏙️`);
         return res.sendStatus(200);
       }
@@ -449,11 +460,29 @@ app.post('/webhook', async (req, res) => {
           ]);
         }
       } else if (stage === 'ממתין_למגורים_השקעה') {
-        await updateLead(row, { מגורים_או_השקעה: text, שלב: 'ממתין_לקבלן_שיפוץ', פנייה_אחרונה: now });
-        await sendButtons(from, 'מעולה, תודה על השיתוף! עוד שאלה קטנה - זה בית מקבלן לפני כניסה, או שמתכננים לשפץ/לתכנן אותו מחדש? 🔨', [
+        if (looksLikeQuestion(text)) {
+          const aiReply = await getAIReply(text, buildLeadContext(existingLead.data));
+          await sendReply(from, aiReply);
+          await sendButtons(from, 'בכל מקרה, זה למגורים או להשקעה? 🏠💰', [
+            { id: 'residential', title: 'למגורים' },
+            { id: 'investment', title: 'להשקעה' },
+          ]);
+          await updateLead(row, { פנייה_אחרונה: now });
+        } else {
+          await updateLead(row, { מגורים_או_השקעה: text, שלב: 'ממתין_לקבלן_שיפוץ', פנייה_אחרונה: now });
+          await sendButtons(from, 'מעולה, תודה על השיתוף! עוד שאלה קטנה - זה בית מקבלן לפני כניסה, או שמתכננים לשפץ/לתכנן אותו מחדש? 🔨', [
+            { id: 'contractor', title: 'קבלן (לפני כניסה)' },
+            { id: 'renovation', title: 'שיפוץ/תכנון מחדש' },
+          ]);
+        }
+      } else if (stage === 'ממתין_לקבלן_שיפוץ' && looksLikeQuestion(text)) {
+        const aiReply = await getAIReply(text, buildLeadContext(existingLead.data));
+        await sendReply(from, aiReply);
+        await sendButtons(from, 'בכל מקרה, זה בית מקבלן לפני כניסה, או שמתכננים לשפץ/לתכנן אותו מחדש? 🔨', [
           { id: 'contractor', title: 'קבלן (לפני כניסה)' },
           { id: 'renovation', title: 'שיפוץ/תכנון מחדש' },
         ]);
+        await updateLead(row, { פנייה_אחרונה: now });
       } else if (stage === 'ממתין_לקבלן_שיפוץ') {
         const step1Due = new Date(
           adjustToBusinessHours(Date.now() + getDeltaHours(1) * 60 * 60 * 1000)
