@@ -406,6 +406,13 @@ app.post('/webhook', async (req, res) => {
       }
 
       if (stage === 'ממתין_לשם') {
+        if (looksLikeQuestion(text)) {
+          const aiReply = await getAIReply(text, buildLeadContext(existingLead.data));
+          await sendReply(from, aiReply);
+          await sendReply(from, 'לפני שממשיכים, מה השם המלא? 😊');
+          await updateLead(row, { פנייה_אחרונה: now });
+          return res.sendStatus(200);
+        }
         await updateLead(row, { שם: text, שלב: 'ממתין_לעיר', פנייה_אחרונה: now });
         await sendReply(from, `נעים מאוד! נשמח להכיר את הפרויקט טוב יותר - באיזה עיר הוא נמצא? 🏙️`);
         return res.sendStatus(200);
@@ -429,11 +436,18 @@ app.post('/webhook', async (req, res) => {
       }
 
       if (stage === 'ממתין_לעיר') {
-        await updateLead(row, { עיר: text, שלב: 'ממתין_למגורים_השקעה', פנייה_אחרונה: now });
-        await sendButtons(from, 'שמח שהצטרפת! 😊 בוא נכיר את הפרויקט טוב יותר - זה למגורים או להשקעה? 🏠💰', [
-          { id: 'residential', title: 'למגורים' },
-          { id: 'investment', title: 'להשקעה' },
-        ]);
+        if (looksLikeQuestion(text)) {
+          const aiReply = await getAIReply(text, buildLeadContext(existingLead.data));
+          await sendReply(from, aiReply);
+          await sendReply(from, 'בכל מקרה, נשמח להכיר את הפרויקט טוב יותר - באיזה עיר הוא נמצא? 🏙️');
+          await updateLead(row, { פנייה_אחרונה: now });
+        } else {
+          await updateLead(row, { עיר: text, שלב: 'ממתין_למגורים_השקעה', פנייה_אחרונה: now });
+          await sendButtons(from, 'שמח שהצטרפת! 😊 בוא נכיר את הפרויקט טוב יותר - זה למגורים או להשקעה? 🏠💰', [
+            { id: 'residential', title: 'למגורים' },
+            { id: 'investment', title: 'להשקעה' },
+          ]);
+        }
       } else if (stage === 'ממתין_למגורים_השקעה') {
         await updateLead(row, { מגורים_או_השקעה: text, שלב: 'ממתין_לקבלן_שיפוץ', פנייה_אחרונה: now });
         await sendButtons(from, 'מעולה, תודה על השיתוף! עוד שאלה קטנה - זה בית מקבלן לפני כניסה, או שמתכננים לשפץ/לתכנן אותו מחדש? 🔨', [
