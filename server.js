@@ -304,14 +304,18 @@ function isInPersonRequested(requestedTimeText) {
 }
 
 // בונה את הודעת אישור הפגישה הסופית ללקוח, כולל התאמה לזום (ברירת מחדל) או פרונטלי (רק אם ביקשו)
-function buildConfirmationMessage(requestedTimeText, formattedTime) {
+function buildConfirmationMessage(requestedTimeText, formattedTime, isUpdate = false) {
   const inPerson = isInPersonRequested(requestedTimeText);
   const meetingType = inPerson
     ? 'הפגישה תתקיים פנים אל פנים ברמת גן.'
     : 'הפגישה תתקיים בשיחת זום 💻.';
   const price = inPerson ? '3,000' : '450';
 
-  return `מעולה, הפגישה אושרה! 🎉
+  const header = isUpdate
+    ? '🔄 עדכון מועד! הפגישה עודכנה בהצלחה 🎉'
+    : 'מעולה, הפגישה אושרה! 🎉';
+
+  return `${header}
 
 פגישת הייעוץ האסטרטגית שלנו, בת שעה, ב-${formattedTime || 'המועד שביקשת'}.
 ${meetingType}
@@ -594,6 +598,38 @@ app.post('/webhook', async (req, res) => {
         // כבר ביקש שעה וממתין לאישור שלנו - לא פותחים שיחה מחדש, רק מרגיעים
         await updateLead(row, { פנייה_אחרונה: now });
         await sendReply(from, 'עדיין בודקים מולך את הזמינות - נחזור אליך ממש בקרוב עם אישור סופי 🙏');
+      } else if (stage === 'פגישה_מאושרת') {
+        const { hasDay, hasTime } = extractDayTimeSignals(text);
+        const mentionsClosedDay = /שישי|שבת/.test(text);
+
+        if (mentionsClosedDay) {
+          await sendReply(from, 'בימי שישי-שבת אנחנו לא עובדים לצערנו - יש לך יום אחר שנוח? 🙏');
+          await updateLead(row, { פנייה_אחרונה: now });
+        } else if (hasDay || hasTime) {
+          // נראה כמו ניסיון לשנות את מועד הפגישה שכבר אושרה - בודקים ומעדכנים במלואו, לא סתם עונים בטקסט.
+          // אם צוין רק יום חדש בלי שעה, נשמר את השעה המקורית שכבר אושרה כדי לא "לאבד" אותה
+          const existingTimeMatch = (existingLead.data.שעה_מבוקשת || '').match(/\d{1,2}:\d{2}/);
+          const textForAnalysis =
+            hasDay && !hasTime && existingTimeMatch ? `${text} בשעה ${existingTimeMatch[0]}` : text;
+          const analysis = await analyzeRequestedTime(textForAnalysis);
+
+          if (analysis.valid) {
+            await updateLead(row, { שעה_מבוקשת: analysis.formatted, פנייה_אחרונה: now });
+            await sendReply(from, buildConfirmationMessage(text, analysis.formatted, true));
+            await sendReply(
+              process.env.OWNER_PHONE,
+              `🔄 עודכן מועד פגישה!\nמספר: ${from}\nמועד חדש: ${analysis.formatted}`
+            );
+          } else {
+            await sendReply(from, 'לצערנו השעה הזו לא פנויה אצלנו - אפשר להציע יום ושעה אחרים? 🙏');
+            await updateLead(row, { פנייה_אחרונה: now });
+          }
+        } else {
+          // הודעה כללית שלא קשורה לשינוי מועד
+          const { reply: aiReply, status: leadStatus } = await getAIReply(text, buildLeadContext(existingLead.data));
+          await sendReply(from, aiReply);
+          await updateLead(row, { פנייה_אחרונה: now, ...(leadStatus ? { עמדת_הליד: leadStatus } : {}) });
+        }
       } else {
         // ליד ידוע שכבר סיים את הסינון, או במצב לא מוכר - עונים בעזרת ה-AI (כדי שעדיין ידע לענות על שאלות כלליות),
         // אבל לא ממשיכים למכור אוטומטית, ותמיד מעדכנים את מאור
