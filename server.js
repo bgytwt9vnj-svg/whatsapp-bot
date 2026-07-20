@@ -254,11 +254,17 @@ async function sendStepContent(to, content) {
   }
 }
 
+// מזהה אם יש בטקסט אזכור של יום ו/או שעה - גם אם זה מנוסח כשאלה (כמו "חמישי?")
+function extractDayTimeSignals(text) {
+  const hasDay = /ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת|מחר|היום/.test(text || '');
+  const hasTime = /\d|בוקר|צהריים|אחה"צ|אחרי הצהריים|ערב|לילה/.test(text || '');
+  return { hasDay, hasTime };
+}
+
 // בודקת אם תשובת הלקוח לגבי מועד הפגישה כללית מדי (בלי יום/שעה ברורים), כדי לוודא שתמיד ננעל מועד ספציפי
 function isVagueTime(text) {
   // צריך גם יום וגם שעה מפורשים - יום לבד (למשל "שלישי") לא מספיק ונחשב מעורפל
-  const hasDay = /ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת|מחר|היום/.test(text || '');
-  const hasTime = /\d|בוקר|צהריים|אחה"צ|אחרי הצהריים|ערב|לילה/.test(text || '');
+  const { hasDay, hasTime } = extractDayTimeSignals(text);
   return !(hasDay && hasTime);
 }
 
@@ -540,21 +546,27 @@ app.post('/webhook', async (req, res) => {
         await sendReply(from, aiReply);
         await sendReply(from, 'רוצה לקבוע את פגישת הייעוץ? באיזה יום ושעה נוח לך? 📅');
       } else if (stage === 'ממתין_לשעת_פגישה') {
-        if (looksLikeQuestion(text)) {
-          // זו שאלה אמיתית, לא ניסיון לענות על יום/שעה - עונים עליה ורק אז חוזרים לבקש שעה
+        // מצרפים לתשובה הנוכחית כל מה שהלקוח כבר אמר קודם על יום/שעה בהודעות קודמות (שעה_מבוקשת משמש כאן כזיכרון זמני),
+        // כדי לא "לשכוח" אם היום והשעה הגיעו בשתי הודעות נפרדות
+        const combinedText = existingLead.data.שעה_מבוקשת ? `${existingLead.data.שעה_מבוקשת} ${text}` : text;
+        const { hasDay, hasTime } = extractDayTimeSignals(combinedText);
+
+        if (!hasDay && !hasTime && looksLikeQuestion(text)) {
+          // אין שום אזכור של יום/שעה, וזו נראית שאלה כללית לא קשורה - עונים עליה ורק אז חוזרים לבקש שעה
           const { reply: aiReply, status: leadStatus } = await getAIReply(text, buildLeadContext(existingLead.data));
           await sendReply(from, aiReply);
           await sendReply(from, 'בכל מקרה, בוא נקבע גם את פגישת הייעוץ - באיזה יום ושעה נוח לך? 📅');
           await updateLead(row, { פנייה_אחרונה: now, ...(leadStatus ? { עמדת_הליד: leadStatus } : {}) });
+        } else if (!(hasDay && hasTime)) {
+          // יש כבר יום או שעה (גם אם נוסח כשאלה, כמו "חמישי?") אבל חסר החלק השני - מבקשים בדיוק את מה שחסר
+          const followUp = hasDay && !hasTime
+            ? 'מעולה! ובאיזו שעה נוח? 🙏'
+            : !hasDay && hasTime
+              ? 'תודה! ובאיזה יום זה יהיה? 🙏'
+              : 'רק כדי לוודא שנתפוס את הזמן הכי טוב - איזה יום בשבוע ובאיזו שעה בדיוק נוח? 🙏';
+          await sendReply(from, followUp);
+          await updateLead(row, { שעה_מבוקשת: combinedText, פנייה_אחרונה: now });
         } else {
-          // מצרפים לתשובה הנוכחית כל מה שהלקוח כבר אמר קודם על יום/שעה בהודעות קודמות (שעה_מבוקשת משמש כאן כזיכרון זמני),
-          // כדי לא "לשכוח" אם היום והשעה הגיעו בשתי הודעות נפרדות
-          const combinedText = existingLead.data.שעה_מבוקשת ? `${existingLead.data.שעה_מבוקשת} ${text}` : text;
-
-          if (isVagueTime(combinedText)) {
-            await sendReply(from, 'רק כדי לוודא שנתפוס את הזמן הכי טוב - איזה יום בשבוע ובאיזו שעה בדיוק נוח? 🙏');
-            await updateLead(row, { שעה_מבוקשת: combinedText, פנייה_אחרונה: now });
-          } else {
             const analysis = await analyzeRequestedTime(combinedText);
 
             if (analysis.valid) {
@@ -573,7 +585,6 @@ app.post('/webhook', async (req, res) => {
               await updateLead(row, { שעה_מבוקשת: '', פנייה_אחרונה: now });
             }
           }
-        }
       } else if (stage === 'ממתין_לאישור_בעלים') {
         // כבר ביקש שעה וממתין לאישור שלנו - לא פותחים שיחה מחדש, רק מרגיעים
         await updateLead(row, { פנייה_אחרונה: now });
