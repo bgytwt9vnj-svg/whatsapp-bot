@@ -550,8 +550,13 @@ app.post('/webhook', async (req, res) => {
         // כדי לא "לשכוח" אם היום והשעה הגיעו בשתי הודעות נפרדות
         const combinedText = existingLead.data.שעה_מבוקשת ? `${existingLead.data.שעה_מבוקשת} ${text}` : text;
         const { hasDay, hasTime } = extractDayTimeSignals(combinedText);
+        const mentionsClosedDay = /שישי|שבת/.test(combinedText);
 
-        if (!hasDay && !hasTime && looksLikeQuestion(text)) {
+        if (mentionsClosedDay) {
+          // יום שישי/שבת אף פעם לא זמין - עדיף לומר את זה בכנות עכשיו, במקום לתת רושם מוטעה ולדחות רק בהמשך
+          await sendReply(from, 'בימי שישי-שבת אנחנו לא עובדים לצערנו - יש לך יום אחר שנוח? 🙏');
+          await updateLead(row, { שעה_מבוקשת: '', פנייה_אחרונה: now });
+        } else if (!hasDay && !hasTime && looksLikeQuestion(text)) {
           // אין שום אזכור של יום/שעה, וזו נראית שאלה כללית לא קשורה - עונים עליה ורק אז חוזרים לבקש שעה
           const { reply: aiReply, status: leadStatus } = await getAIReply(text, buildLeadContext(existingLead.data));
           await sendReply(from, aiReply);
