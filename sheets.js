@@ -19,6 +19,7 @@ const COLUMNS = [
   'סטטוס_פגישה',
   'הערות',
   'בקרת_בוט',
+  'עמדת_הליד',
 ];
 
 function getAuthClient() {
@@ -39,7 +40,7 @@ async function findLeadByPhone(phone) {
   const sheets = await getSheetsClient();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A:M`,
+    range: `${SHEET_NAME}!A:N`,
   });
 
   const rows = res.data.values || [];
@@ -69,7 +70,7 @@ async function createLead(phone, fields = {}) {
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A${nextRow}:M${nextRow}`,
+    range: `${SHEET_NAME}!A${nextRow}:N${nextRow}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [row] },
   });
@@ -80,7 +81,7 @@ async function getAllLeads() {
   const sheets = await getSheetsClient();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A:M`,
+    range: `${SHEET_NAME}!A:N`,
   });
 
   const rows = res.data.values || [];

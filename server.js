@@ -99,6 +99,7 @@ async function getAIReply(customerText, context = '') {
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     temperature: 0.5,
+    response_format: { type: 'json_object' },
     messages: [
       {
         role: 'system',
@@ -134,13 +135,22 @@ async function getAIReply(customerText, context = '') {
 - הטון שלכם אנרגטי, סוחף, ולבבי במיוחד - עוטף את הלקוח בתחושה שהוא הגיע בדיוק למקום הנכון ושצוות שלם עומד לצידו. עוררו סקרנות אמיתית להמשיך לשוחח ולהתקדם לפגישת הייעוץ האסטרטגית, כדי לקבל את הערך המלא. עשו זאת רק באמצעות הדגשת ערך אמיתי (מקצועיות, ניסיון, התאמה אישית) - לעולם לא באמצעות דחיפות מזויפת, הבטחות שאינכם בטוחים בהן, או לחץ שמרגיש לא כן.
 - אם הלקוח עדיין לא קבע פגישה, **תמיד** סיימו את התשובה בשאלה פתוחה ומתרימה שמעוררת צורך ומקדמת לעבר קביעת הפגישה (למשל "מה הכי מטריד אתכם בתהליך כרגע?") - לעולם לא בשאלת כן/לא סגורה, ולעולם לא בלי שאלה בכלל.
 - אינכם יודעים אם אתם פונים לגבר או לאישה. לכן פנו בגוף שני בלי לציין במפורש "אתה" או "את", והשתמשו במילים שכתובות זהה בזכר ובנקבה (כמו "רוצה", "אותך", "לך") כדי שהפנייה תרגיש אישית ומדויקת לכל אחד. שימו לב במיוחד לפעלים בזמן עתיד/תנאי שכן חושפים מגדר (כמו "תרצה"/"תרצי", "תוכל"/"תוכלי") - הם **אסורים**, גם אם "רוצה"/"יכול" הרגילים בהווה בסדר. נסחו מחדש כדי להימנע מהם לגמרי (למשל "יש עוד משהו לדעת?" במקום "אם יש משהו שתרצה לדעת").
-${context ? `\nהקשר על השיחה עד כה עם הלקוח הזה (חשוב! השתמשו בזה כדי שהתשובה תרגיש כמו המשך שיחה, לא כמו התחלה חדשה): ${context}` : ''}`,
+${context ? `\nהקשר על השיחה עד כה עם הלקוח הזה (חשוב! השתמשו בזה כדי שהתשובה תרגיש כמו המשך שיחה, לא כמו התחלה חדשה): ${context}` : ''}
+
+חובה למלא את שדה ה-status בכל פעם שהלקוח מביע התלבטות, חשש, שינוי דעה, בקשה מיוחדת, או כל מידע שכדאי שמאור ידע לפני שיוצר קשר - למשל אם נשאל על מחיר/עלות, הביע ספק אם צריך שירות, ציין אילוץ (תקציב, זמן), או ביקש משהו לא סטנדרטי. השאירו ריק רק אם ההודעה היא פרט טכני נטול משמעות (כמו רק שם עיר). דוגמה: אם הלקוח כתב "זה לא יקר מדי?" - ה-status צריך להיות בערך "הביע/ה חשש מהמחיר, ייתכן שצריך הרגעה לגבי הערך שמקבלים בפגישה".
+
+החזירו את התשובה **אך ורק** בפורמט JSON: {"reply": "התשובה המלאה שתישלח ללקוח", "status": "משפט קצר שמתעד את מה שעלה, או מחרוזת ריקה אם באמת אין שום דבר משמעותי"}`,
       },
       { role: 'user', content: customerText },
     ],
   });
 
-  return completion.choices[0].message.content;
+  try {
+    const result = JSON.parse(completion.choices[0].message.content);
+    return { reply: result.reply || '', status: result.status || '' };
+  } catch {
+    return { reply: completion.choices[0].message.content, status: '' };
+  }
 }
 
 app.get('/', (req, res) => {
@@ -265,6 +275,7 @@ function buildLeadContext(data) {
   if (data.קבלן_או_שיפוץ) parts.push(`קבלן/שיפוץ: ${data.קבלן_או_שיפוץ}`);
   if (data.שעה_מבוקשת) parts.push(`ביקש/ה פגישה בשעה: ${data.שעה_מבוקשת}`);
   if (data.סטטוס_פגישה) parts.push(`סטטוס פגישה: ${data.סטטוס_פגישה}`);
+  if (data.עמדת_הליד) parts.push(`עמדה קודמת שתועדה: ${data.עמדת_הליד}`);
   return parts.length ? parts.join(', ') : 'עדיין אין הרבה פרטים על הליד הזה.';
 }
 
@@ -386,8 +397,8 @@ app.post('/webhook', async (req, res) => {
         console.log('נוצר ליד חדש בגיליון, מתחיל שאלון סינון');
 
         await sendReply(from, 'איזה כיף שהגעת אלינו למאור ברקת עיצוב ותכנון! 💫 הגעת בדיוק למקום הנכון - הצוות שלנו כאן ללוות ולעזור בכל שלב 🤍');
-        const aiReply = await getAIReply(text);
-        await sendReply(from, aiReply);
+        const { reply: firstReply } = await getAIReply(text);
+        await sendReply(from, firstReply);
         await sendReply(from, 'לפני שממשיכים, מה השם המלא? 😊');
         return res.sendStatus(200);
       }
@@ -407,10 +418,10 @@ app.post('/webhook', async (req, res) => {
 
       if (stage === 'ממתין_לשם') {
         if (looksLikeQuestion(text)) {
-          const aiReply = await getAIReply(text, buildLeadContext(existingLead.data));
+          const { reply: aiReply, status: leadStatus } = await getAIReply(text, buildLeadContext(existingLead.data));
           await sendReply(from, aiReply);
           await sendReply(from, 'לפני שממשיכים, מה השם המלא? 😊');
-          await updateLead(row, { פנייה_אחרונה: now });
+          await updateLead(row, { פנייה_אחרונה: now, ...(leadStatus ? { עמדת_הליד: leadStatus } : {}) });
           return res.sendStatus(200);
         }
 
@@ -448,10 +459,10 @@ app.post('/webhook', async (req, res) => {
 
       if (stage === 'ממתין_לעיר') {
         if (looksLikeQuestion(text)) {
-          const aiReply = await getAIReply(text, buildLeadContext(existingLead.data));
+          const { reply: aiReply, status: leadStatus } = await getAIReply(text, buildLeadContext(existingLead.data));
           await sendReply(from, aiReply);
           await sendReply(from, 'בכל מקרה, נשמח להכיר את הפרויקט טוב יותר - באיזה עיר הוא נמצא? 🏙️');
-          await updateLead(row, { פנייה_אחרונה: now });
+          await updateLead(row, { פנייה_אחרונה: now, ...(leadStatus ? { עמדת_הליד: leadStatus } : {}) });
         } else {
           await updateLead(row, { עיר: text, שלב: 'ממתין_למגורים_השקעה', פנייה_אחרונה: now });
           await sendButtons(from, 'שמח שהצטרפת! 😊 בוא נכיר את הפרויקט טוב יותר - זה למגורים או להשקעה? 🏠💰', [
@@ -461,13 +472,13 @@ app.post('/webhook', async (req, res) => {
         }
       } else if (stage === 'ממתין_למגורים_השקעה') {
         if (looksLikeQuestion(text)) {
-          const aiReply = await getAIReply(text, buildLeadContext(existingLead.data));
+          const { reply: aiReply, status: leadStatus } = await getAIReply(text, buildLeadContext(existingLead.data));
           await sendReply(from, aiReply);
           await sendButtons(from, 'בכל מקרה, זה למגורים או להשקעה? 🏠💰', [
             { id: 'residential', title: 'למגורים' },
             { id: 'investment', title: 'להשקעה' },
           ]);
-          await updateLead(row, { פנייה_אחרונה: now });
+          await updateLead(row, { פנייה_אחרונה: now, ...(leadStatus ? { עמדת_הליד: leadStatus } : {}) });
         } else {
           await updateLead(row, { מגורים_או_השקעה: text, שלב: 'ממתין_לקבלן_שיפוץ', פנייה_אחרונה: now });
           await sendButtons(from, 'מעולה, תודה על השיתוף! עוד שאלה קטנה - זה בית מקבלן לפני כניסה, או שמתכננים לשפץ/לתכנן אותו מחדש? 🔨', [
@@ -476,13 +487,13 @@ app.post('/webhook', async (req, res) => {
           ]);
         }
       } else if (stage === 'ממתין_לקבלן_שיפוץ' && looksLikeQuestion(text)) {
-        const aiReply = await getAIReply(text, buildLeadContext(existingLead.data));
+        const { reply: aiReply, status: leadStatus } = await getAIReply(text, buildLeadContext(existingLead.data));
         await sendReply(from, aiReply);
         await sendButtons(from, 'בכל מקרה, זה בית מקבלן לפני כניסה, או שמתכננים לשפץ/לתכנן אותו מחדש? 🔨', [
           { id: 'contractor', title: 'קבלן (לפני כניסה)' },
           { id: 'renovation', title: 'שיפוץ/תכנון מחדש' },
         ]);
-        await updateLead(row, { פנייה_אחרונה: now });
+        await updateLead(row, { פנייה_אחרונה: now, ...(leadStatus ? { עמדת_הליד: leadStatus } : {}) });
       } else if (stage === 'ממתין_לקבלן_שיפוץ') {
         const step1Due = new Date(
           adjustToBusinessHours(Date.now() + getDeltaHours(1) * 60 * 60 * 1000)
@@ -520,17 +531,21 @@ app.post('/webhook', async (req, res) => {
         }
       } else if (stage === 'סינון_הושלם') {
         // הליד ממשיך לשוחח אחרי שקיבל את הסרטון הראשון - מזמינים אותו לקבוע פגישה
-        await updateLead(row, { שלב: 'ממתין_לשעת_פגישה', פנייה_אחרונה: now });
-        const aiReply = await getAIReply(text, buildLeadContext(existingLead.data));
+        const { reply: aiReply, status: leadStatus } = await getAIReply(text, buildLeadContext(existingLead.data));
+        await updateLead(row, {
+          שלב: 'ממתין_לשעת_פגישה',
+          פנייה_אחרונה: now,
+          ...(leadStatus ? { עמדת_הליד: leadStatus } : {}),
+        });
         await sendReply(from, aiReply);
         await sendReply(from, 'רוצה לקבוע את פגישת הייעוץ? באיזה יום ושעה נוח לך? 📅');
       } else if (stage === 'ממתין_לשעת_פגישה') {
         if (looksLikeQuestion(text)) {
           // זו שאלה אמיתית, לא ניסיון לענות על יום/שעה - עונים עליה ורק אז חוזרים לבקש שעה
-          const aiReply = await getAIReply(text, buildLeadContext(existingLead.data));
+          const { reply: aiReply, status: leadStatus } = await getAIReply(text, buildLeadContext(existingLead.data));
           await sendReply(from, aiReply);
           await sendReply(from, 'בכל מקרה, בוא נקבע גם את פגישת הייעוץ - באיזה יום ושעה נוח לך? 📅');
-          await updateLead(row, { פנייה_אחרונה: now });
+          await updateLead(row, { פנייה_אחרונה: now, ...(leadStatus ? { עמדת_הליד: leadStatus } : {}) });
         } else {
           // מצרפים לתשובה הנוכחית כל מה שהלקוח כבר אמר קודם על יום/שעה בהודעות קודמות (שעה_מבוקשת משמש כאן כזיכרון זמני),
           // כדי לא "לשכוח" אם היום והשעה הגיעו בשתי הודעות נפרדות
@@ -566,8 +581,8 @@ app.post('/webhook', async (req, res) => {
       } else {
         // ליד ידוע שכבר סיים את הסינון, או במצב לא מוכר - עונים בעזרת ה-AI (כדי שעדיין ידע לענות על שאלות כלליות),
         // אבל לא ממשיכים למכור אוטומטית, ותמיד מעדכנים את מאור
-        await updateLead(row, { פנייה_אחרונה: now });
-        const aiReply = await getAIReply(text, buildLeadContext(existingLead.data));
+        const { reply: aiReply, status: leadStatus } = await getAIReply(text, buildLeadContext(existingLead.data));
+        await updateLead(row, { פנייה_אחרונה: now, ...(leadStatus ? { עמדת_הליד: leadStatus } : {}) });
         await sendReply(from, aiReply);
         await sendReply(
           process.env.OWNER_PHONE,
